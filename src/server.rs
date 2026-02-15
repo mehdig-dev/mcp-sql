@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -16,6 +17,7 @@ pub struct McpSqlServer {
     db: Arc<DatabaseManager>,
     allow_write: bool,
     row_limit: u32,
+    query_timeout: Duration,
     tool_router: ToolRouter<Self>,
 }
 
@@ -39,6 +41,20 @@ pub struct DescribeTableParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SampleDataParams {
+    #[schemars(description = "Table name to sample rows from")]
+    pub table: String,
+
+    #[schemars(description = "Database name (optional if only one database is connected)")]
+    #[serde(default)]
+    pub database: Option<String>,
+
+    #[schemars(description = "Number of sample rows to return (default: 5)")]
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct QueryParams {
     #[schemars(description = "SQL query to execute")]
     pub sql: String,
@@ -49,11 +65,12 @@ pub struct QueryParams {
 }
 
 impl McpSqlServer {
-    pub fn new(db: DatabaseManager, allow_write: bool, row_limit: u32) -> Self {
+    pub fn new(db: DatabaseManager, allow_write: bool, row_limit: u32, query_timeout_secs: u64) -> Self {
         Self {
             db: Arc::new(db),
             allow_write,
             row_limit,
+            query_timeout: Duration::from_secs(query_timeout_secs),
             tool_router: Self::tool_router(),
         }
     }
@@ -154,10 +171,13 @@ impl McpSqlServer {
         // Inject LIMIT if not present
         let limited_sql = inject_limit(sql, self.row_limit);
 
-        let rows = sqlx::query(&limited_sql)
-            .fetch_all(&entry.pool)
-            .await
-            .map_err(|e| self.err(McpSqlError::Database(e)))?;
+        let rows = tokio::time::timeout(
+            self.query_timeout,
+            sqlx::query(&limited_sql).fetch_all(&entry.pool),
+        )
+        .await
+        .map_err(|_| self.err(McpSqlError::QueryTimeout(self.query_timeout.as_secs())))?
+        .map_err(|e| self.err(McpSqlError::Database(e)))?;
 
         let results: Vec<serde_json::Value> = rows.iter().map(row_to_json).collect();
         let text = serde_json::to_string_pretty(&serde_json::json!({
@@ -181,14 +201,46 @@ impl McpSqlServer {
         let prefix = dialect::explain_prefix(entry.backend);
         let explain_sql = format!("{}{}", prefix, params.sql.trim());
 
-        let rows = sqlx::query(&explain_sql)
-            .fetch_all(&entry.pool)
-            .await
-            .map_err(|e| self.err(McpSqlError::Database(e)))?;
+        let rows = tokio::time::timeout(
+            self.query_timeout,
+            sqlx::query(&explain_sql).fetch_all(&entry.pool),
+        )
+        .await
+        .map_err(|_| self.err(McpSqlError::QueryTimeout(self.query_timeout.as_secs())))?
+        .map_err(|e| self.err(McpSqlError::Database(e)))?;
 
         let results: Vec<serde_json::Value> = rows.iter().map(row_to_json).collect();
         let text = serde_json::to_string_pretty(&results)
             .unwrap_or_else(|_| "[]".to_string());
+
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    #[tool(
+        name = "sample_data",
+        description = "Return sample rows from a table as JSON. Useful for previewing table contents without writing SQL."
+    )]
+    async fn sample_data(
+        &self,
+        Parameters(params): Parameters<SampleDataParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let entry = self.db.resolve(params.database.as_deref()).map_err(|e| self.err(e))?;
+        let limit = params.limit.unwrap_or(5);
+
+        let rows = tokio::time::timeout(
+            self.query_timeout,
+            dialect::sample_data(&entry.pool, entry.backend, &params.table, limit),
+        )
+        .await
+        .map_err(|_| self.err(McpSqlError::QueryTimeout(self.query_timeout.as_secs())))?
+        .map_err(|e| self.err(e))?;
+
+        let text = serde_json::to_string_pretty(&serde_json::json!({
+            "table": params.table,
+            "rows": rows,
+            "count": rows.len(),
+        }))
+        .unwrap_or_else(|_| "{}".to_string());
 
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
@@ -207,8 +259,8 @@ impl ServerHandler for McpSqlServer {
             },
             instructions: Some(
                 "SQL database server. Use list_databases to see connected databases, \
-                 list_tables to see tables, describe_table for schema details, \
-                 query to run SQL, and explain for query plans."
+                 list_tables to see tables, describe_table for schema details (includes foreign keys), \
+                 sample_data to preview table contents, query to run SQL, and explain for query plans."
                     .to_string(),
             ),
         }

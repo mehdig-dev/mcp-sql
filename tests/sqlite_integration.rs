@@ -172,6 +172,130 @@ async fn test_explain() {
 }
 
 #[tokio::test]
+async fn test_sample_data() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let rows = mcp_sql::db::dialect::sample_data(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "users",
+        5,
+    )
+    .await
+    .unwrap();
+
+    // We inserted 2 users, so we should get 2 back
+    assert_eq!(rows.len(), 2);
+
+    // Each row should have expected columns
+    let first = &rows[0];
+    assert!(first.get("id").is_some());
+    assert!(first.get("name").is_some());
+    assert!(first.get("email").is_some());
+}
+
+#[tokio::test]
+async fn test_sample_data_with_limit() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let rows = mcp_sql::db::dialect::sample_data(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "users",
+        1,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(rows.len(), 1);
+}
+
+#[tokio::test]
+async fn test_sample_data_invalid_table() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let result = mcp_sql::db::dialect::sample_data(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "nonexistent",
+        5,
+    )
+    .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_describe_table_foreign_keys() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    // posts table has a FK from user_id -> users(id)
+    let columns = mcp_sql::db::dialect::describe_table(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "posts",
+    )
+    .await
+    .unwrap();
+
+    // Find the user_id column
+    let user_id_col = columns
+        .iter()
+        .find(|c| c.get("name").and_then(|v| v.as_str()) == Some("user_id"))
+        .expect("user_id column should exist");
+
+    // Should have a foreign_key field pointing to users.id
+    let fk = user_id_col.get("foreign_key").and_then(|v| v.as_str());
+    assert_eq!(fk, Some("users.id"));
+
+    // The id column should have no FK
+    let id_col = columns
+        .iter()
+        .find(|c| c.get("name").and_then(|v| v.as_str()) == Some("id"))
+        .expect("id column should exist");
+
+    assert!(
+        id_col.get("foreign_key").unwrap().is_null(),
+        "id column should have null foreign_key"
+    );
+}
+
+#[tokio::test]
+async fn test_describe_table_no_foreign_keys() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    // users table has no FKs
+    let columns = mcp_sql::db::dialect::describe_table(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "users",
+    )
+    .await
+    .unwrap();
+
+    // All columns should have null foreign_key
+    for col in &columns {
+        let fk = col.get("foreign_key");
+        assert!(
+            fk.is_none() || fk.unwrap().is_null(),
+            "users table should have no foreign keys, but {:?} has {:?}",
+            col.get("name"),
+            fk
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_numeric_types() {
     sqlx::any::install_default_drivers();
     let pool = create_test_pool().await;

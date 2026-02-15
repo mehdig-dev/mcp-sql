@@ -17,6 +17,9 @@ pub enum McpSqlError {
     #[error("Invalid SQL: {0}")]
     InvalidSql(String),
 
+    #[error("Query timed out after {0} seconds")]
+    QueryTimeout(u64),
+
     #[error("{0}")]
     Other(String),
 }
@@ -29,6 +32,9 @@ impl McpSqlError {
             }
             McpSqlError::DatabaseNotFound(_) | McpSqlError::AmbiguousDatabase => {
                 ErrorData::invalid_params(self.to_string(), None)
+            }
+            McpSqlError::QueryTimeout(_) => {
+                ErrorData::internal_error(self.to_string(), None)
             }
             McpSqlError::Database(_) | McpSqlError::Other(_) => {
                 ErrorData::internal_error(self.to_string(), None)
