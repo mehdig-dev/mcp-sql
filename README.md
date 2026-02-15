@@ -1,6 +1,10 @@
-# mcp-sql
+<div align="center">
+  <img src="mascot.png" alt="mcp-sql owl mascot" width="200">
 
-MCP server that lets LLMs query PostgreSQL, SQLite, and MySQL databases. Single binary, read-only by default, multi-database.
+  # mcp-sql
+
+  MCP server that lets LLMs query PostgreSQL, SQLite, and MySQL databases. Single binary, read-only by default, multi-database.
+</div>
 
 ## Install
 
