@@ -5,3 +5,5 @@
 *.db
 *.sqlite
 *.sqlite3
+*:Zone.Identifier
+TASK.md

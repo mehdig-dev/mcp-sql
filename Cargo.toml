@@ -10,6 +10,7 @@ homepage = "https://github.com/mehdig-dev/mcp-sql"
 keywords = ["mcp", "sql", "database", "llm", "ai"]
 categories = ["database", "command-line-utilities"]
 readme = "README.md"
+exclude = [".github/", ".claude/", "TASK.md", "*.Zone.Identifier"]
 
 [dependencies]
 rmcp = { version = "0.15", features = ["server", "transport-io", "macros"] }
