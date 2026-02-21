@@ -269,6 +269,21 @@ impl McpSqlServer {
             .map_err(|e| self.err(e))?;
         Ok(CallToolResult::success(vec![Content::text(ddl)]))
     }
+
+    #[tool(
+        name = "show_schema",
+        description = "Show a Mermaid ER diagram of all tables and their relationships in the database"
+    )]
+    async fn show_schema(
+        &self,
+        Parameters(params): Parameters<DatabaseParam>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let entry = self.db.resolve(params.database.as_deref()).map_err(|e| self.err(e))?;
+        let diagram = crate::schema::generate_mermaid_er(&entry.pool, entry.backend)
+            .await
+            .map_err(|e| self.err(e))?;
+        Ok(CallToolResult::success(vec![Content::text(diagram)]))
+    }
 }
 
 #[tool_handler]
@@ -285,8 +300,8 @@ impl ServerHandler for McpSqlServer {
             instructions: Some(
                 "SQL database server. Use list_databases to see connected databases, \
                  list_tables to see tables, describe_table for schema details (includes foreign keys), \
-                 show_create_table for DDL statements, sample_data to preview table contents, \
-                 query to run SQL, and explain for query plans."
+                 show_create_table for DDL statements, show_schema for a Mermaid ER diagram, \
+                 sample_data to preview table contents, query to run SQL, and explain for query plans."
                     .to_string(),
             ),
         }

@@ -2,6 +2,7 @@ use serde_json::Value;
 use sqlx::Row;
 
 mod common;
+#[allow(unused_imports)]
 use common::*;
 
 #[tokio::test]
@@ -417,4 +418,42 @@ async fn test_demo_database() {
     .await
     .unwrap();
     assert_eq!(fk_rows.len(), 3); // Alice has 3 posts
+}
+
+#[tokio::test]
+async fn test_show_schema_mermaid() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let diagram = mcp_sql::schema::generate_mermaid_er(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+    )
+    .await
+    .unwrap();
+
+    assert!(diagram.starts_with("erDiagram"), "should start with erDiagram");
+    assert!(diagram.contains("users"), "should contain users table");
+    assert!(diagram.contains("posts"), "should contain posts table");
+    assert!(diagram.contains("PK"), "should mark primary keys");
+    assert!(diagram.contains("FK"), "should mark foreign keys");
+    // FK relationship line
+    assert!(diagram.contains("||--o{"), "should contain relationship lines");
+}
+
+#[tokio::test]
+async fn test_show_schema_empty_database() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    // Don't create schema — empty database
+
+    let diagram = mcp_sql::schema::generate_mermaid_er(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+    )
+    .await
+    .unwrap();
+
+    assert!(diagram.contains("No tables found"));
 }
