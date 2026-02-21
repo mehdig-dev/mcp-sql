@@ -65,6 +65,16 @@ pub struct ShowCreateTableParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListIndexesParams {
+    #[schemars(description = "Table name")]
+    pub table: String,
+
+    #[schemars(description = "Database name (optional if only one database is connected)")]
+    #[serde(default)]
+    pub database: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct QueryParams {
     #[schemars(description = "SQL query to execute")]
     pub sql: String,
@@ -284,6 +294,22 @@ impl McpSqlServer {
             .map_err(|e| self.err(e))?;
         Ok(CallToolResult::success(vec![Content::text(diagram)]))
     }
+
+    #[tool(
+        name = "list_indexes",
+        description = "List all indexes on a table with column names and uniqueness"
+    )]
+    async fn list_indexes(
+        &self,
+        Parameters(params): Parameters<ListIndexesParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let entry = self.db.resolve(params.database.as_deref()).map_err(|e| self.err(e))?;
+        let indexes = dialect::list_indexes(&entry.pool, entry.backend, &params.table)
+            .await
+            .map_err(|e| self.err(e))?;
+        let json = serde_json::to_string_pretty(&indexes).unwrap_or_default();
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
 }
 
 #[tool_handler]
@@ -301,7 +327,8 @@ impl ServerHandler for McpSqlServer {
                 "SQL database server. Use list_databases to see connected databases, \
                  list_tables to see tables, describe_table for schema details (includes foreign keys), \
                  show_create_table for DDL statements, show_schema for a Mermaid ER diagram, \
-                 sample_data to preview table contents, query to run SQL, and explain for query plans."
+                 list_indexes for index details, sample_data to preview table contents, \
+                 query to run SQL, and explain for query plans."
                     .to_string(),
             ),
         }

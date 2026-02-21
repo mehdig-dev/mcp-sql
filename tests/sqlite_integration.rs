@@ -1,4 +1,5 @@
 use serde_json::Value;
+#[allow(unused_imports)]
 use sqlx::Row;
 
 mod common;
@@ -471,4 +472,62 @@ async fn test_show_schema_empty_database() {
     .unwrap();
 
     assert!(diagram.contains("No tables found"));
+}
+
+#[tokio::test]
+async fn test_list_indexes() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    // Create an explicit index
+    sqlx::query("CREATE INDEX idx_users_email ON users(email)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let indexes = mcp_sql::db::dialect::list_indexes(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "users",
+    )
+    .await
+    .unwrap();
+
+    assert!(!indexes.is_empty(), "should have at least one index");
+    let idx = indexes.iter().find(|i| {
+        i.get("index_name").and_then(|v| v.as_str()) == Some("idx_users_email")
+    });
+    assert!(idx.is_some(), "should find idx_users_email");
+    let cols = idx
+        .unwrap()
+        .get("columns")
+        .and_then(|v| v.as_array())
+        .unwrap();
+    assert!(cols.iter().any(|c| c.as_str() == Some("email")));
+}
+
+#[tokio::test]
+async fn test_list_indexes_empty() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    // users table has no explicit indexes (only the implicit rowid/PK)
+    // SQLite's PRAGMA index_list only returns explicitly created indexes
+    let indexes = mcp_sql::db::dialect::list_indexes(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "users",
+    )
+    .await
+    .unwrap();
+
+    // The autoincrement PK may or may not appear; just verify it doesn't error
+    // If there are results, they should have the expected shape
+    for idx in &indexes {
+        assert!(idx.get("index_name").is_some());
+        assert!(idx.get("columns").is_some());
+        assert!(idx.get("unique").is_some());
+    }
 }

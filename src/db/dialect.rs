@@ -335,6 +335,111 @@ pub async fn show_create_table(
     }
 }
 
+/// Returns index information for a table.
+pub async fn list_indexes(
+    pool: &AnyPool,
+    backend: DbBackend,
+    table: &str,
+) -> Result<Vec<Value>, McpSqlError> {
+    let table = sanitize_identifier(table)?;
+
+    match backend {
+        DbBackend::Sqlite => {
+            let index_rows = sqlx::query(&format!(
+                "PRAGMA index_list(\"{}\")",
+                table.replace('"', "\"\"")
+            ))
+            .fetch_all(pool)
+            .await?;
+
+            let mut indexes = Vec::new();
+            for row in &index_rows {
+                let name: String = row.try_get("name")?;
+                let unique: bool = row
+                    .try_get::<i32, _>("unique")
+                    .map(|v| v == 1)
+                    .unwrap_or(false);
+
+                let col_rows = sqlx::query(&format!(
+                    "PRAGMA index_info(\"{}\")",
+                    name.replace('"', "\"\"")
+                ))
+                .fetch_all(pool)
+                .await?;
+                let columns: Vec<String> = col_rows
+                    .iter()
+                    .filter_map(|r| r.try_get::<String, _>("name").ok())
+                    .collect();
+
+                indexes.push(serde_json::json!({
+                    "index_name": name,
+                    "columns": columns,
+                    "unique": unique,
+                }));
+            }
+            Ok(indexes)
+        }
+        DbBackend::Postgres => {
+            let rows = sqlx::query(
+                "SELECT indexname, indexdef FROM pg_indexes \
+                 WHERE tablename = $1 ORDER BY indexname",
+            )
+            .bind(&table)
+            .fetch_all(pool)
+            .await?;
+
+            let mut indexes = Vec::new();
+            for row in &rows {
+                let name: String = row.try_get("indexname")?;
+                let def: String = row.try_get("indexdef")?;
+                let unique = def.to_uppercase().contains("UNIQUE");
+                indexes.push(serde_json::json!({
+                    "index_name": name,
+                    "definition": def,
+                    "unique": unique,
+                }));
+            }
+            Ok(indexes)
+        }
+        DbBackend::Mysql => {
+            let rows = sqlx::query(
+                "SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE \
+                 FROM information_schema.STATISTICS \
+                 WHERE TABLE_NAME = ? AND TABLE_SCHEMA = DATABASE() \
+                 ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+            )
+            .bind(&table)
+            .fetch_all(pool)
+            .await?;
+
+            // Group columns by index name
+            let mut index_map: std::collections::HashMap<String, (Vec<String>, bool)> =
+                std::collections::HashMap::new();
+            for row in &rows {
+                let name: String = row.try_get("INDEX_NAME")?;
+                let col: String = row.try_get("COLUMN_NAME")?;
+                let non_unique: i32 = row.try_get("NON_UNIQUE")?;
+                let entry = index_map
+                    .entry(name)
+                    .or_insert_with(|| (Vec::new(), non_unique == 0));
+                entry.0.push(col);
+            }
+
+            let indexes = index_map
+                .into_iter()
+                .map(|(name, (columns, unique))| {
+                    serde_json::json!({
+                        "index_name": name,
+                        "columns": columns,
+                        "unique": unique,
+                    })
+                })
+                .collect();
+            Ok(indexes)
+        }
+    }
+}
+
 /// Validate and sanitize a SQL identifier to prevent injection.
 fn sanitize_identifier(name: &str) -> Result<String, McpSqlError> {
     // Allow alphanumeric, underscore, dot (for schema.table), and hyphen
