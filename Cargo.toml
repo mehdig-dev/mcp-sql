@@ -1,6 +1,6 @@
 [package]
 name = "mcp-sql"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 description = "MCP server that lets LLMs query PostgreSQL, SQLite, and MySQL databases"

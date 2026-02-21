@@ -15,6 +15,9 @@ cargo install mcp-sql
 ## Usage
 
 ```bash
+# Demo mode — try it instantly with sample data
+mcp-sql --demo
+
 # Single database
 mcp-sql --url postgres://user:pass@localhost/mydb
 
@@ -100,11 +103,15 @@ Add to your MCP config (`.cursor/mcp.json` or equivalent):
 | Tool | Description |
 |------|-------------|
 | `list_databases` | Show all connected databases with name and type |
-| `list_tables` | List tables with approximate row counts |
+| `list_tables` | List tables with row counts |
 | `describe_table` | Column details: name, type, nullable, default, primary key, foreign key |
+| `show_create_table` | Show the CREATE TABLE DDL statement for a table |
+| `show_schema` | Mermaid ER diagram of all tables and their relationships |
+| `list_indexes` | Index names, columns, and uniqueness constraints |
 | `sample_data` | Return sample rows from a table as JSON (no SQL needed) |
 | `query` | Execute SQL and return results as JSON |
 | `explain` | Show query execution plan |
+| `query_dry_run` | Validate SQL and show query plan without executing |
 
 All tools accept an optional `database` parameter when multiple databases are connected. If only one database is connected, it's used automatically.
 
@@ -114,11 +121,12 @@ All tools accept an optional `database` parameter when multiple databases are co
 |------|---------|-------------|
 | `--url` | — | Database connection URL (repeatable) |
 | `--url-env` | — | Read database URL from an environment variable (repeatable) |
+| `--demo` | `false` | Start with a demo SQLite database pre-loaded with sample data |
 | `--allow-write` | `false` | Enable write operations (INSERT, UPDATE, DELETE, CREATE, DROP) |
 | `--row-limit` | `100` | Maximum rows returned per query |
 | `--query-timeout` | `30` | Query timeout in seconds |
 
-At least one `--url` or `--url-env` is required.
+At least one `--url` or `--url-env` is required (unless using `--demo`).
 
 ## Safety
 
