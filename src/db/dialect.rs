@@ -17,10 +17,36 @@ pub async fn list_tables(pool: &AnyPool, backend: DbBackend) -> Result<Vec<Value
              ORDER BY table_name"
         }
         DbBackend::Sqlite => {
-            "SELECT name AS table_name, 0 AS row_count \
-             FROM sqlite_master \
-             WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
-             ORDER BY name"
+            // Get table names first
+            let name_rows = sqlx::query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+            )
+            .fetch_all(pool)
+            .await?;
+
+            let mut results = Vec::new();
+            for row in &name_rows {
+                let name: String = row.try_get("name")?;
+                // Count rows with a timeout — fall back to 0 for very large tables
+                let count: i64 = match tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    sqlx::query_as::<_, (i64,)>(&format!(
+                        "SELECT COUNT(*) FROM \"{}\"",
+                        name.replace('"', "\"\"")
+                    ))
+                    .fetch_one(pool),
+                )
+                .await
+                {
+                    Ok(Ok((c,))) => c,
+                    _ => 0,
+                };
+                results.push(serde_json::json!({
+                    "table_name": name,
+                    "row_count": count,
+                }));
+            }
+            return Ok(results);
         }
         DbBackend::Mysql => {
             "SELECT table_name, table_rows AS row_count \

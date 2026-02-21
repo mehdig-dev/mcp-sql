@@ -21,6 +21,21 @@ async fn test_list_tables() {
         .collect();
     assert!(names.contains(&"users"));
     assert!(names.contains(&"posts"));
+
+    // Verify row counts are now accurate (not hardcoded 0)
+    let users_count = tables
+        .iter()
+        .find(|t| t.get("table_name").and_then(|v| v.as_str()) == Some("users"))
+        .and_then(|t| t.get("row_count").and_then(|v| v.as_i64()))
+        .unwrap_or(0);
+    assert_eq!(users_count, 2, "users table should have 2 rows");
+
+    let posts_count = tables
+        .iter()
+        .find(|t| t.get("table_name").and_then(|v| v.as_str()) == Some("posts"))
+        .and_then(|t| t.get("row_count").and_then(|v| v.as_i64()))
+        .unwrap_or(0);
+    assert_eq!(posts_count, 1, "posts table should have 1 row");
 }
 
 #[tokio::test]
