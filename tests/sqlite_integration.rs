@@ -339,6 +339,41 @@ async fn test_numeric_types() {
 }
 
 #[tokio::test]
+async fn test_show_create_table() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let ddl = mcp_sql::db::dialect::show_create_table(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "users",
+    )
+    .await
+    .unwrap();
+
+    assert!(ddl.contains("CREATE TABLE"), "DDL should contain CREATE TABLE");
+    assert!(ddl.contains("users"), "DDL should reference the table name");
+    assert!(ddl.contains("name TEXT"), "DDL should include column definitions");
+}
+
+#[tokio::test]
+async fn test_show_create_table_not_found() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let result = mcp_sql::db::dialect::show_create_table(
+        &pool,
+        mcp_sql::db::DbBackend::Sqlite,
+        "nonexistent",
+    )
+    .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
 async fn test_demo_database() {
     sqlx::any::install_default_drivers();
     let pool = mcp_sql::demo::create_demo_database().await.unwrap();

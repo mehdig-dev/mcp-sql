@@ -55,6 +55,16 @@ pub struct SampleDataParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ShowCreateTableParams {
+    #[schemars(description = "Table name")]
+    pub table: String,
+
+    #[schemars(description = "Database name (optional if only one database is connected)")]
+    #[serde(default)]
+    pub database: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct QueryParams {
     #[schemars(description = "SQL query to execute")]
     pub sql: String,
@@ -244,6 +254,21 @@ impl McpSqlServer {
 
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
+
+    #[tool(
+        name = "show_create_table",
+        description = "Show the CREATE TABLE DDL statement for a table"
+    )]
+    async fn show_create_table(
+        &self,
+        Parameters(params): Parameters<ShowCreateTableParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let entry = self.db.resolve(params.database.as_deref()).map_err(|e| self.err(e))?;
+        let ddl = dialect::show_create_table(&entry.pool, entry.backend, &params.table)
+            .await
+            .map_err(|e| self.err(e))?;
+        Ok(CallToolResult::success(vec![Content::text(ddl)]))
+    }
 }
 
 #[tool_handler]
@@ -260,7 +285,8 @@ impl ServerHandler for McpSqlServer {
             instructions: Some(
                 "SQL database server. Use list_databases to see connected databases, \
                  list_tables to see tables, describe_table for schema details (includes foreign keys), \
-                 sample_data to preview table contents, query to run SQL, and explain for query plans."
+                 show_create_table for DDL statements, sample_data to preview table contents, \
+                 query to run SQL, and explain for query plans."
                     .to_string(),
             ),
         }

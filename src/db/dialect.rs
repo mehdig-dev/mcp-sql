@@ -238,6 +238,77 @@ pub fn explain_prefix(backend: DbBackend) -> &'static str {
     }
 }
 
+/// Returns the CREATE TABLE DDL for a given table.
+pub async fn show_create_table(
+    pool: &AnyPool,
+    backend: DbBackend,
+    table: &str,
+) -> Result<String, McpSqlError> {
+    let table = sanitize_identifier(table)?;
+
+    match backend {
+        DbBackend::Sqlite => {
+            let sql =
+                format!("SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'");
+            let row = sqlx::query(&sql)
+                .fetch_optional(pool)
+                .await?
+                .ok_or_else(|| McpSqlError::Other(format!("table '{table}' not found")))?;
+            let ddl: String = row.try_get("sql")?;
+            Ok(ddl)
+        }
+        DbBackend::Mysql => {
+            let sql = format!("SHOW CREATE TABLE `{table}`");
+            let row = sqlx::query(&sql)
+                .fetch_one(pool)
+                .await
+                .map_err(|_| McpSqlError::Other(format!("table '{table}' not found")))?;
+            // MySQL returns two columns: "Table" and "Create Table"
+            let ddl: String = row.try_get(1)?;
+            Ok(ddl)
+        }
+        DbBackend::Postgres => {
+            // PostgreSQL has no built-in SHOW CREATE TABLE.
+            // Reconstruct from information_schema.
+            let rows = sqlx::query(
+                "SELECT column_name, data_type, is_nullable, column_default \
+                 FROM information_schema.columns \
+                 WHERE table_name = $1 \
+                 ORDER BY ordinal_position",
+            )
+            .bind(&table)
+            .fetch_all(pool)
+            .await?;
+
+            if rows.is_empty() {
+                return Err(McpSqlError::Other(format!("table '{table}' not found")));
+            }
+
+            let mut ddl = format!("CREATE TABLE {table} (\n");
+            for (i, row) in rows.iter().enumerate() {
+                let name: String = row.try_get("column_name")?;
+                let dtype: String = row.try_get("data_type")?;
+                let nullable: String = row.try_get("is_nullable")?;
+                let default: Option<String> = row.try_get("column_default").ok();
+
+                ddl.push_str(&format!("    {name} {}", dtype.to_uppercase()));
+                if nullable == "NO" {
+                    ddl.push_str(" NOT NULL");
+                }
+                if let Some(def) = default {
+                    ddl.push_str(&format!(" DEFAULT {def}"));
+                }
+                if i < rows.len() - 1 {
+                    ddl.push(',');
+                }
+                ddl.push('\n');
+            }
+            ddl.push_str(");");
+            Ok(ddl)
+        }
+    }
+}
+
 /// Validate and sanitize a SQL identifier to prevent injection.
 fn sanitize_identifier(name: &str) -> Result<String, McpSqlError> {
     // Allow alphanumeric, underscore, dot (for schema.table), and hyphen
