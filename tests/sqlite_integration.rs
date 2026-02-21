@@ -531,3 +531,31 @@ async fn test_list_indexes_empty() {
         assert!(idx.get("unique").is_some());
     }
 }
+
+#[tokio::test]
+async fn test_query_dry_run_valid() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let explain_sql = format!(
+        "{}SELECT * FROM users WHERE name = 'Alice'",
+        mcp_sql::db::dialect::explain_prefix(mcp_sql::db::DbBackend::Sqlite),
+    );
+    let rows = sqlx::query(&explain_sql).fetch_all(&pool).await;
+    assert!(rows.is_ok(), "valid SQL should produce a query plan");
+}
+
+#[tokio::test]
+async fn test_query_dry_run_invalid() {
+    sqlx::any::install_default_drivers();
+    let pool = create_test_pool().await;
+    setup_test_schema(&pool).await;
+
+    let explain_sql = format!(
+        "{}SELECT * FROM nonexistent_table",
+        mcp_sql::db::dialect::explain_prefix(mcp_sql::db::DbBackend::Sqlite),
+    );
+    let result = sqlx::query(&explain_sql).fetch_all(&pool).await;
+    assert!(result.is_err(), "invalid SQL should produce an error");
+}

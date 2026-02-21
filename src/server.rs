@@ -310,6 +310,46 @@ impl McpSqlServer {
         let json = serde_json::to_string_pretty(&indexes).unwrap_or_default();
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
+
+    #[tool(
+        name = "query_dry_run",
+        description = "Validate a SQL query without executing it. Returns the query plan and any warnings."
+    )]
+    async fn query_dry_run(
+        &self,
+        Parameters(params): Parameters<QueryParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let entry = self.db.resolve(params.database.as_deref()).map_err(|e| self.err(e))?;
+
+        // Use EXPLAIN to validate without executing
+        let explain_sql = format!(
+            "{}{}",
+            dialect::explain_prefix(entry.backend),
+            params.sql
+        );
+
+        match sqlx::query(&explain_sql).fetch_all(&entry.pool).await {
+            Ok(rows) => {
+                let plan: Vec<serde_json::Value> = rows.iter().map(row_to_json).collect();
+                let result = serde_json::json!({
+                    "valid": true,
+                    "query_plan": plan,
+                });
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&result).unwrap_or_default(),
+                )]))
+            }
+            Err(e) => {
+                let result = serde_json::json!({
+                    "valid": false,
+                    "error": e.to_string(),
+                });
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&result).unwrap_or_default(),
+                )]))
+            }
+        }
+    }
 }
 
 #[tool_handler]
@@ -328,7 +368,7 @@ impl ServerHandler for McpSqlServer {
                  list_tables to see tables, describe_table for schema details (includes foreign keys), \
                  show_create_table for DDL statements, show_schema for a Mermaid ER diagram, \
                  list_indexes for index details, sample_data to preview table contents, \
-                 query to run SQL, and explain for query plans."
+                 query to run SQL, explain for query plans, and query_dry_run to validate SQL without executing."
                     .to_string(),
             ),
         }
