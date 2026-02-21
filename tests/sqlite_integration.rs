@@ -1,4 +1,5 @@
 use serde_json::Value;
+use sqlx::Row;
 
 mod common;
 use common::*;
@@ -335,4 +336,50 @@ async fn test_numeric_types() {
         result.get("text_val").and_then(|v| v.as_str()),
         Some("hello")
     );
+}
+
+#[tokio::test]
+async fn test_demo_database() {
+    sqlx::any::install_default_drivers();
+    let pool = mcp_sql::demo::create_demo_database().await.unwrap();
+
+    // Verify tables exist
+    let tables: Vec<sqlx::any::AnyRow> = sqlx::query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let names: Vec<String> = tables.iter().map(|r| r.get::<String, _>("name")).collect();
+    assert!(names.contains(&"users".to_string()));
+    assert!(names.contains(&"posts".to_string()));
+    assert!(names.contains(&"comments".to_string()));
+
+    // Verify row counts
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count.0, 10);
+
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM posts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count.0, 10);
+
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM comments")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count.0, 15);
+
+    // Verify FK relationships
+    let fk_rows: Vec<sqlx::any::AnyRow> = sqlx::query(
+        "SELECT u.name, p.title FROM posts p JOIN users u ON p.user_id = u.id WHERE u.name = 'Alice Chen'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(fk_rows.len(), 3); // Alice has 3 posts
 }

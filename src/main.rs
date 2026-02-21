@@ -30,6 +30,10 @@ struct Cli {
     /// Query timeout in seconds (default: 30)
     #[arg(long, default_value = "30")]
     query_timeout: u64,
+
+    /// Start with a demo SQLite database pre-loaded with sample data
+    #[arg(long)]
+    demo: bool,
 }
 
 #[tokio::main]
@@ -43,6 +47,26 @@ async fn main() -> Result<()> {
 
     // Install sqlx's runtime drivers for all supported databases
     sqlx::any::install_default_drivers();
+
+    if cli.demo {
+        let pool = mcp_sql::demo::create_demo_database()
+            .await
+            .expect("failed to create demo database");
+        let entry = mcp_sql::db::DatabaseEntry {
+            name: "demo".to_string(),
+            pool,
+            backend: mcp_sql::db::DbBackend::Sqlite,
+            url_redacted: "sqlite::memory: (demo)".to_string(),
+        };
+        let manager = mcp_sql::db::DatabaseManager {
+            databases: vec![entry],
+        };
+        let server = server::McpSqlServer::new(manager, false, cli.row_limit, cli.query_timeout);
+        tracing::info!("mcp-sql demo mode — SQLite with sample tables (users, posts, comments)");
+        let ct = server.serve(stdio()).await?;
+        ct.waiting().await?;
+        return Ok(());
+    }
 
     // Collect URLs from --url and --url-env
     let mut all_urls = cli.urls.clone();
